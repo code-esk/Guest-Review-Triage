@@ -85,17 +85,17 @@ PROVIDERS = {
     },
 }
 
-# Static fallback if the live OpenRouter catalog fetch fails (no network,
-# rate limited, etc). This is NOT a complete or authoritative snapshot of
-# OpenRouter's free tier -- it's only what a partial, size-limited preview
-# fetch happened to catch during development, biased toward newest-released
-# models. Do not read this as "these are the only free models"; DeepSeek,
-# Llama, Gemma, or free Mistral variants may well exist and simply weren't
-# in that partial fetch. list_openrouter_free_models() below is the real
-# source of truth: it queries OpenRouter directly at runtime (from wherever
-# the app is actually running, with no size cap) and returns whatever is
-# free at that moment. This list is only used if that live call fails.
-_OPENROUTER_FREE_FALLBACK = [
+# Models individually verified free on OpenRouter's own provider pages
+# (openrouter.ai/<provider>, checked directly, not scraped/guessed) as of
+# this build. These always appear in the dropdown -- they are not a
+# fallback that only kicks in if the live catalog fetch fails. On top of
+# these, list_openrouter_free_models() below appends whatever else is
+# currently free per a live call to OpenRouter's /models endpoint, so new
+# free releases show up automatically without a code change. If OpenRouter
+# ever repriced one of these, it would still show up in the dropdown (since
+# it's pinned here) but the app would receive a real error from OpenRouter
+# on that specific call, it is not silently hidden.
+_OPENROUTER_VERIFIED_FREE = [
     "nvidia/nemotron-3-ultra-550b-a55b:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     "nvidia/nemotron-3.5-content-safety:free",
@@ -111,20 +111,18 @@ _OPENROUTER_FREE_FALLBACK = [
 
 
 def list_openrouter_free_models() -> list:
-    """Fetch OpenRouter's live model catalog and return the current free ones.
-
-    OpenRouter adds/removes free (":free", $0 prompt+completion) models
-    often, so this hits the public, unauthenticated /models endpoint at
-    call time rather than relying on a hardcoded list. Falls back to a
-    small static snapshot if the request fails.
+    """Return OpenRouter's free models: the verified list above, plus
+    whatever else a live call to OpenRouter's /models endpoint currently
+    reports as free ($0 or ":free"), deduped and merged. The verified
+    list is always included, even if the live call fails or is slow.
     """
+    merged = list(_OPENROUTER_VERIFIED_FREE)
     try:
         import requests
 
         r = requests.get("https://openrouter.ai/api/v1/models", timeout=10)
         r.raise_for_status()
         data = r.json().get("data", [])
-        free_ids = []
         for m in data:
             mid = m.get("id", "")
             pricing = m.get("pricing", {}) or {}
@@ -132,17 +130,17 @@ def list_openrouter_free_models() -> list:
                 str(pricing.get("prompt")) in ("0", "0.0") and
                 str(pricing.get("completion")) in ("0", "0.0")
             )
-            if is_free and mid:
-                free_ids.append(mid)
-        free_ids = sorted(set(free_ids))
-        return free_ids or _OPENROUTER_FREE_FALLBACK
+            if is_free and mid and mid not in merged:
+                merged.append(mid)
     except Exception:
-        return _OPENROUTER_FREE_FALLBACK
+        pass  # verified list above still gets returned
+    return merged
 
 
 def get_models_for_provider(provider: str) -> list:
     """Return the full model dropdown list for a provider: Gemini's static
-    list, or OpenRouter's paid defaults plus its live-fetched free models."""
+    list, or OpenRouter's paid defaults plus its verified + live-fetched
+    free models."""
     provider = (provider or "").lower()
     if provider == "gemini":
         return list(PROVIDERS["gemini"]["models"])

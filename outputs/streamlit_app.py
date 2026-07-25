@@ -40,7 +40,10 @@ from aspect_pipeline import (
 )
 from llm_aspect_data import LLM_OUTPUTS, DRAFT_RESPONSES
 
-st.set_page_config(page_title="Guest Review Triage", layout="wide")
+st.set_page_config(
+    page_title="Guest Review Triage", layout="wide",
+    initial_sidebar_state="expanded",
+)
 st.title("Guest Review Triage")
 st.caption(
     "Aspect-based sentiment + escalation flagging for hotel guest reviews. "
