@@ -144,6 +144,33 @@ else:
 
 st.text_area("Review text", review_text, height=150, disabled=True, label_visibility="collapsed")
 
+# ---------------------------------------------------------------------------
+# Session state: running comparison log, one entry per "Analyze review" click
+# ---------------------------------------------------------------------------
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "next_id" not in st.session_state:
+    st.session_state.next_id = 1
+if "current_id" not in st.session_state:
+    st.session_state.current_id = None
+
+
+def _entry_by_id(entry_id):
+    for e in st.session_state.history:
+        if e["id"] == entry_id:
+            return e
+    return None
+
+
+def _effective_escalate(entry):
+    """True escalation status after applying any manager override."""
+    if entry["manual_override"] == "escalate":
+        return True
+    if entry["manual_override"] == "clear":
+        return False
+    return entry["model_escalate"]
+
+
 if st.button("Analyze review", type="primary") and review_text.strip():
     with st.spinner("Analyzing..."):
         try:
@@ -155,36 +182,168 @@ if st.button("Analyze review", type="primary") and review_text.strip():
             st.error(str(e))
             st.stop()
 
+    entry = {
+        "id": st.session_state.next_id,
+        "review_label": f"#{review_id}" if review_id is not None else f"Pasted: {review_text[:30]}...",
+        "review_text": review_text,
+        "review_id": review_id,
+        "provider": provider_choice_label,
+        "model": model_choice,
+        "aspects": result["aspects"],
+        "overall_sentiment": result["overall_sentiment"],
+        "model_escalate": result["escalate"],
+        "severity": result["severity"],
+        "escalate_reason": result.get("escalate_reason"),
+        "manual_override": None,
+        "manual_reason": "",
+        "vader_label": vader_label(review_text),
+        "draft": None,
+    }
+    st.session_state.history.append(entry)
+    st.session_state.next_id += 1
+    st.session_state.current_id = entry["id"]
+
+current = _entry_by_id(st.session_state.current_id) if st.session_state.current_id else None
+
+if current is not None:
     st.subheader("2. Aspect-based sentiment")
     aspect_cols = st.columns(3)
-    for i, (aspect, sentiment) in enumerate(result["aspects"].items()):
+    for i, (aspect, sentiment) in enumerate(current["aspects"].items()):
         color = {"positive": "🟢", "negative": "🔴", "neutral": "🟡"}[sentiment]
         with aspect_cols[i % 3]:
             st.metric(aspect.replace("_", " ").title(), f"{color} {sentiment}")
 
     st.subheader("3. Overall sentiment & escalation")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Overall sentiment", result["overall_sentiment"].title())
-    c2.metric("Escalate?", "Yes" if result["escalate"] else "No")
-    c3.metric("Severity", result["severity"].title())
+    c1.metric("Overall sentiment", current["overall_sentiment"].title())
+    c2.metric("Model escalation call", "Yes" if current["model_escalate"] else "No")
+    c3.metric("Severity", current["severity"].title())
 
-    if result["escalate"]:
-        st.warning(f"**Why flagged:** {result['escalate_reason']}")
-        st.subheader("4. Draft management response")
-        draft = draft_response(
-            review_text, result, review_id=review_id,
-            provider=provider_choice, model=model_choice, api_key=active_key,
+    # -----------------------------------------------------------------
+    # Manager override: two-way -- can force-escalate a miss, or clear
+    # a flag they judge to be a false positive.
+    # -----------------------------------------------------------------
+    st.subheader("4. Manager review")
+    effective = _effective_escalate(current)
+    if current["manual_override"] == "escalate":
+        st.info("Manually escalated by manager (model said No).")
+    elif current["manual_override"] == "clear":
+        st.info("Manually cleared by manager (model said Yes, judged not urgent).")
+
+    override_cols = st.columns([1, 1, 2])
+    with override_cols[0]:
+        if not current["model_escalate"] and current["manual_override"] != "escalate":
+            if st.button("Escalate manually", key=f"escalate_{current['id']}"):
+                current["manual_override"] = "escalate"
+                current["draft"] = None
+                st.rerun()
+        elif current["manual_override"] == "escalate":
+            if st.button("Undo manual escalation", key=f"undo_escalate_{current['id']}"):
+                current["manual_override"] = None
+                current["draft"] = None
+                st.rerun()
+    with override_cols[1]:
+        if current["model_escalate"] and current["manual_override"] != "clear":
+            if st.button("Clear (false positive)", key=f"clear_{current['id']}"):
+                current["manual_override"] = "clear"
+                current["draft"] = None
+                st.rerun()
+        elif current["manual_override"] == "clear":
+            if st.button("Undo clear", key=f"undo_clear_{current['id']}"):
+                current["manual_override"] = None
+                current["draft"] = None
+                st.rerun()
+
+    if current["manual_override"] == "escalate":
+        current["manual_reason"] = st.text_input(
+            "Manager's reason for escalating (used in the draft response)",
+            value=current["manual_reason"],
+            key=f"reason_{current['id']}",
         )
-        st.text_area("Editable draft (human reviews before sending)", draft, height=140)
-    else:
-        st.success("No escalation needed -- routine feedback.")
 
-    with st.expander("Compare: what a plain sentiment classifier (VADER) would say"):
-        st.write(f"VADER overall sentiment: **{vader_label(review_text)}** (no aspects, no escalation flag)")
+    # -----------------------------------------------------------------
+    # Draft response: generated only when the review is, right now,
+    # effectively escalated -- by the model or by the manager.
+    # -----------------------------------------------------------------
+    if effective:
+        st.subheader("5. Draft management response")
+        if current["draft"] is None:
+            draft_analysis = dict(current)
+            if current["manual_override"] == "escalate" and current["manual_reason"].strip():
+                draft_analysis["escalate_reason"] = current["manual_reason"].strip()
+            elif current["manual_override"] == "escalate" and not current["escalate_reason"]:
+                draft_analysis["escalate_reason"] = "Flagged by manager for escalation (see review)."
+            with st.spinner("Drafting response..."):
+                current["draft"] = draft_response(
+                    current["review_text"], draft_analysis, review_id=current["review_id"],
+                    provider=provider_choice, model=model_choice, api_key=active_key,
+                )
+        st.text_area(
+            "Editable draft (human reviews before sending)",
+            current["draft"], height=140, key=f"draft_box_{current['id']}",
+        )
+        if st.button("Regenerate draft", key=f"regen_{current['id']}"):
+            current["draft"] = None
+            st.rerun()
+    else:
+        st.success("No escalation needed -- routine feedback. No draft is generated.")
+
+    # -----------------------------------------------------------------
+    # VADER, shown in its own box, compared against the model's call.
+    # -----------------------------------------------------------------
+    st.subheader("6. VADER baseline (plain sentiment classifier)")
+    vc1, vc2 = st.columns(2)
+    with vc1:
+        st.metric("Model overall sentiment", current["overall_sentiment"].title())
+    with vc2:
+        st.metric("VADER overall sentiment", current["vader_label"].title())
+    if current["overall_sentiment"].lower() == current["vader_label"].lower():
+        st.caption("VADER agrees with the model's overall sentiment.")
+    else:
+        st.caption(
+            "VADER disagrees with the model's overall sentiment. "
+            "VADER has no aspects and no escalation logic -- it's a single "
+            "lexicon-based score over the whole review, shown here only as a floor baseline."
+        )
+
+# ---------------------------------------------------------------------------
+# Running comparison table across every analysis run this session
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("Session comparison table")
+if not st.session_state.history:
+    st.caption("Run \"Analyze review\" to start building a comparison table here.")
+else:
+    rows = []
+    for e in st.session_state.history:
+        eff = _effective_escalate(e)
+        escalate_label = "Yes" if eff else "No"
+        if e["manual_override"] == "escalate":
+            escalate_label += " (manual)"
+        elif e["manual_override"] == "clear":
+            escalate_label += " (cleared)"
+        rows.append({
+            "Review": e["review_label"],
+            "Provider": e["provider"],
+            "Model": e["model"],
+            "Food": e["aspects"].get("food", "-"),
+            "Staff": e["aspects"].get("staff", "-"),
+            "Health": e["aspects"].get("health", "-"),
+            "Overall sentiment": e["overall_sentiment"],
+            "Escalate": escalate_label,
+            "Severity": e["severity"],
+            "VADER sentiment": e["vader_label"],
+        })
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    if st.button("Clear comparison table"):
+        st.session_state.history = []
+        st.session_state.current_id = None
+        st.rerun()
 
 st.divider()
 st.caption(
     "Aspects tracked: " + ", ".join(ASPECT_CATEGORIES) +
-    ". Escalation is triggered only for safety, health/pest, security, or billing-fraud issues."
+    ". Escalation is triggered only for safety, health/pest, security, or billing-fraud issues, "
+    "or by manager override above."
 )
 st.caption("Created by Group C6")
