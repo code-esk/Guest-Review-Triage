@@ -50,23 +50,96 @@ ASPECT_CATEGORIES = [
 
 # Providers this pipeline knows how to call, and the default model used for
 # each unless the caller (the Streamlit sidebar) overrides it.
+#
+# Gemini's list below is hardcoded from ai.google.dev/gemini-api/docs/models
+# (checked live), limited to stable + preview models that are not marked
+# shut down. OpenRouter's list is fetched live at runtime instead (see
+# list_openrouter_free_models below) because its free-tier lineup changes
+# often; the entries here are just a handful of well-known paid defaults.
 PROVIDERS = {
     "gemini": {
         "label": "Gemini",
         "key_env": "GEMINI_API_KEY",
-        "models": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
+        "models": [
+            "gemini-3.6-flash",       # latest stable, best speed/intelligence balance
+            "gemini-3.5-flash",       # stable, near-Pro intelligence
+            "gemini-3.5-flash-lite",  # stable, lite/cost-efficient
+            "gemini-3.1-flash-lite",  # stable, lite
+            "gemini-3.1-pro-preview", # preview, most capable Gemini 3 Pro
+            "gemini-3-flash-preview", # preview
+            "gemini-2.5-pro",         # previous gen, still supported
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+        ],
     },
     "openrouter": {
         "label": "OpenRouter",
         "key_env": "OPENROUTER_API_KEY",
         "models": [
-            "openai/gpt-4o-mini",
-            "anthropic/claude-3.5-haiku",
-            "meta-llama/llama-3.1-8b-instruct",
-            "google/gemini-2.0-flash-001",
+            "openai/gpt-5.6-sol",
+            "anthropic/claude-sonnet-5",
+            "anthropic/claude-haiku-latest",
+            "x-ai/grok-4.5",
+            "google/gemini-3.5-flash",
         ],
     },
 }
+
+# Static fallback if the live OpenRouter catalog fetch fails (no network,
+# rate limited, etc). Verified free (":free", $0 prompt+completion) as of
+# this build; OpenRouter's free lineup as of now does NOT include any
+# Mistral, Llama, or Gemma models -- both currently sit at zero $0-priced
+# listings on OpenRouter, despite commonly being assumed to have free tiers.
+_OPENROUTER_FREE_FALLBACK = [
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "nvidia/nemotron-3.5-content-safety:free",
+    "poolside/laguna-m.1:free",
+    "poolside/laguna-xs-2.1:free",
+    "cohere/north-mini-code:free",
+    "tencent/hy3:free",
+]
+
+
+def list_openrouter_free_models() -> list:
+    """Fetch OpenRouter's live model catalog and return the current free ones.
+
+    OpenRouter adds/removes free (":free", $0 prompt+completion) models
+    often, so this hits the public, unauthenticated /models endpoint at
+    call time rather than relying on a hardcoded list. Falls back to a
+    small static snapshot if the request fails.
+    """
+    try:
+        import requests
+
+        r = requests.get("https://openrouter.ai/api/v1/models", timeout=10)
+        r.raise_for_status()
+        data = r.json().get("data", [])
+        free_ids = []
+        for m in data:
+            mid = m.get("id", "")
+            pricing = m.get("pricing", {}) or {}
+            is_free = mid.endswith(":free") or (
+                str(pricing.get("prompt")) in ("0", "0.0") and
+                str(pricing.get("completion")) in ("0", "0.0")
+            )
+            if is_free and mid:
+                free_ids.append(mid)
+        free_ids = sorted(set(free_ids))
+        return free_ids or _OPENROUTER_FREE_FALLBACK
+    except Exception:
+        return _OPENROUTER_FREE_FALLBACK
+
+
+def get_models_for_provider(provider: str) -> list:
+    """Return the full model dropdown list for a provider: Gemini's static
+    list, or OpenRouter's paid defaults plus its live-fetched free models."""
+    provider = (provider or "").lower()
+    if provider == "gemini":
+        return list(PROVIDERS["gemini"]["models"])
+    if provider == "openrouter":
+        return list(PROVIDERS["openrouter"]["models"]) + list_openrouter_free_models()
+    return []
 
 PROMPT_TEMPLATE = """You are analyzing a hotel guest review for a hotel operations team.
 

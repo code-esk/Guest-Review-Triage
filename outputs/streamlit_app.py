@@ -34,7 +34,10 @@ if os.path.exists(LEXICON_FILE) and not os.path.exists(LEXICON_ZIP):
     with zipfile.ZipFile(LEXICON_ZIP, 'w', zipfile.ZIP_DEFLATED) as zf:
         zf.write(LEXICON_FILE, arcname='vader_lexicon/vader_lexicon.txt')
 
-from aspect_pipeline import analyze_review, draft_response, test_connection, PROVIDERS, ASPECT_CATEGORIES
+from aspect_pipeline import (
+    analyze_review, draft_response, test_connection, PROVIDERS,
+    get_models_for_provider, ASPECT_CATEGORIES,
+)
 from llm_aspect_data import LLM_OUTPUTS, DRAFT_RESPONSES
 
 st.set_page_config(page_title="Guest Review Triage", layout="wide")
@@ -60,9 +63,16 @@ with st.sidebar:
     )
     provider_choice = provider_label_to_key[provider_choice_label]
 
+    @st.cache_data(ttl=3600)
+    def _cached_models(provider: str):
+        return get_models_for_provider(provider)
+
+    with st.spinner("Loading model list..."):
+        model_options = _cached_models(provider_choice)
     model_choice = st.selectbox(
-        "Model", PROVIDERS[provider_choice]["models"], index=0,
+        "Model", model_options, index=0,
         key=f"model_{provider_choice}",
+        help="OpenRouter's free (\":free\") models are fetched live and change often.",
     )
 
     st.divider()
