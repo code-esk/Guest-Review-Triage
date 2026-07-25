@@ -86,10 +86,15 @@ PROVIDERS = {
 }
 
 # Static fallback if the live OpenRouter catalog fetch fails (no network,
-# rate limited, etc). Verified free (":free", $0 prompt+completion) as of
-# this build; OpenRouter's free lineup as of now does NOT include any
-# Mistral, Llama, or Gemma models -- both currently sit at zero $0-priced
-# listings on OpenRouter, despite commonly being assumed to have free tiers.
+# rate limited, etc). This is NOT a complete or authoritative snapshot of
+# OpenRouter's free tier -- it's only what a partial, size-limited preview
+# fetch happened to catch during development, biased toward newest-released
+# models. Do not read this as "these are the only free models"; DeepSeek,
+# Llama, Gemma, or free Mistral variants may well exist and simply weren't
+# in that partial fetch. list_openrouter_free_models() below is the real
+# source of truth: it queries OpenRouter directly at runtime (from wherever
+# the app is actually running, with no size cap) and returns whatever is
+# free at that moment. This list is only used if that live call fails.
 _OPENROUTER_FREE_FALLBACK = [
     "nvidia/nemotron-3-ultra-550b-a55b:free",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
