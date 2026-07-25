@@ -15,13 +15,23 @@ What it does:
 """
 import json
 import os
+import zipfile
 import pandas as pd
 import streamlit as st
 import nltk
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(_HERE, "data")
 nltk.data.path.append(os.path.join(_HERE, "nltk_data"))
 from nltk.sentiment import SentimentIntensityAnalyzer
+
+LEXICON_DIR = os.path.join(_HERE, 'nltk_data', 'sentiment', 'vader_lexicon')
+LEXICON_FILE = os.path.join(LEXICON_DIR, 'vader_lexicon.txt')
+LEXICON_ZIP = os.path.join(_HERE, 'nltk_data', 'sentiment', 'vader_lexicon.zip')
+
+if os.path.exists(LEXICON_FILE) and not os.path.exists(LEXICON_ZIP):
+    with zipfile.ZipFile(LEXICON_ZIP, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.write(LEXICON_FILE, arcname='vader_lexicon/vader_lexicon.txt')
 
 from aspect_pipeline import analyze_review, draft_response, ASPECT_CATEGORIES
 from llm_aspect_data import LLM_OUTPUTS, DRAFT_RESPONSES
@@ -47,7 +57,7 @@ def vader_label(text):
 
 @st.cache_data
 def load_sample_reviews():
-    df = pd.read_csv("data/llm_subset.csv")
+    df = pd.read_csv(os.path.join(DATA_DIR, "llm_subset.csv"))
     return df
 
 
@@ -108,3 +118,4 @@ st.caption(
     "Aspects tracked: " + ", ".join(ASPECT_CATEGORIES) +
     ". Escalation is triggered only for safety, health/pest, security, or billing-fraud issues."
 )
+st.caption("Created by Group C6")

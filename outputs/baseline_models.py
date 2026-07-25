@@ -17,17 +17,28 @@ Ground truth for accuracy: 3-class label derived from the star rating
   rating 1-2 -> negative, rating 3 -> neutral, rating 4-5 -> positive
 """
 import os
+import zipfile
 import pandas as pd
 import nltk
 _HERE = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(_HERE, "data")
 nltk.data.path.append(os.path.join(_HERE, "nltk_data"))
 from nltk.sentiment import SentimentIntensityAnalyzer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, classification_report
 
-FULL = pd.read_csv('data/tripadvisor_hotel_reviews.csv')
-EVAL = pd.read_csv('data/eval_set.csv')
+# Ensure the bundled VADER lexicon is available to NLTK without an external download.
+LEXICON_DIR = os.path.join(_HERE, 'nltk_data', 'sentiment', 'vader_lexicon')
+LEXICON_FILE = os.path.join(LEXICON_DIR, 'vader_lexicon.txt')
+LEXICON_ZIP = os.path.join(_HERE, 'nltk_data', 'sentiment', 'vader_lexicon.zip')
+
+if os.path.exists(LEXICON_FILE) and not os.path.exists(LEXICON_ZIP):
+    with zipfile.ZipFile(LEXICON_ZIP, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.write(LEXICON_FILE, arcname='vader_lexicon/vader_lexicon.txt')
+
+FULL = pd.read_csv(os.path.join(DATA_DIR, 'tripadvisor_hotel_reviews.csv'))
+EVAL = pd.read_csv(os.path.join(DATA_DIR, 'eval_set.csv'))
 
 def rating_to_label(r):
     if r <= 2:
@@ -77,5 +88,5 @@ print('Accuracy:', accuracy_score(EVAL['true_label'], EVAL['tfidf_label']))
 print('Macro F1:', f1_score(EVAL['true_label'], EVAL['tfidf_label'], average='macro'))
 print(classification_report(EVAL['true_label'], EVAL['tfidf_label']))
 
-EVAL.to_csv('data/eval_with_baselines.csv', index=False)
-print('Saved data/eval_with_baselines.csv')
+EVAL.to_csv(os.path.join(DATA_DIR, 'eval_with_baselines.csv'), index=False)
+print(f'Saved {os.path.join(DATA_DIR, "eval_with_baselines.csv")}')
