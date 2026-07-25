@@ -2,3 +2,5 @@ streamlit
 nltk
 scikit-learn
 pandas
+google-genai
+requests
