@@ -103,6 +103,10 @@ _OPENROUTER_FREE_FALLBACK = [
     "poolside/laguna-xs-2.1:free",
     "cohere/north-mini-code:free",
     "tencent/hy3:free",
+    "nousresearch/hermes-4-405b:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "openai/gpt-oss-20b:free",
 ]
 
 
